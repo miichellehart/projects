@@ -1,0 +1,1141 @@
+---
+title: "Machine Learning Coursework"
+author: "Michelle"
+date: '2023-03-03'
+output: html_document
+---
+#Download all the datasets here
+#https://drive.google.com/drive/folders/1Iuji7ihkNarx-vtdEWMxmYg4C74LozM7
+
+#Set working directory
+```{r}
+setwd("/Users/Michelle/Desktop/ML Datasets")
+```
+
+##LOAD LIBRARY
+```{r}
+library(dplyr)
+library(plyr)
+library(corrplot)
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(psych)
+library(cluster)
+library(factoextra)
+library(scales)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggrepel)
+library(plotly)
+library(Metrics)
+library(DT)
+library(GGally)
+library(MASS)
+library(ggpmisc)
+library(caTools)
+library(randomForest)
+library(caret)
+library(forecast)
+library(e1071)
+library(Hmisc)
+library(cowplot)
+```
+**UNSUPERVISED LEARNING**
+#Load the dataset
+```{r}
+country_data <- read.csv("country.csv",sep = ",", header = TRUE)
+head(country_data)
+```
+#Load the data description
+```{r}
+country_desc <- read.csv("country_dictionary.csv", header = TRUE) 
+country_desc
+```
+#Data Exploration
+```{r}
+str(country_data)
+summary(country_data)
+```
+#Check the missing values and duplicate data
+```{r}
+sum(is.na(country_data))
+sum(duplicated(country_data))
+```
+*Result: There are no null values in the data and no duplicate values*
+
+#Remove country to make the data in numerical variables
+```{r}
+country <- country_data[-c(1)]
+country
+country1 <- country_data[c(1)]
+```
+
+#Check for outliers
+```{r}
+country %>% 
+  gather(Attributes, values, c(1:4, 6:8)) %>% 
+  ggplot(aes(x=reorder(Attributes, values, fun=median), y=values, fill=Attributes)) +
+  geom_boxplot(show.legend=FALSE) +
+  labs(title="Boxplot for Each Variables") +
+  theme_minimal()  +
+  theme(axis.title.y=element_blank(),
+        axis.title.x=element_blank(),
+        plot.title = element_text(hjust = 0.4)) +
+  ylim(0, 210) +
+  coord_flip()
+```
+*Note: We removed GDPP and Income since both variables are in a different scale*
+*Result: We see that there are outliers in every variables and we decided to keep them as they probably represent the country's bad situation and in need for financial help*
+
+#Check the variables' distribution
+```{r}
+country_median <- country %>% 
+  gather(Attribute, values) %>% 
+  group_by(Attribute) %>% 
+  dplyr::summarise(median = median(values))
+country %>% 
+  gather(Attribute, values) %>% 
+  ggplot(aes(values, fill = Attribute)) +
+  geom_histogram() +
+  facet_wrap(~Attribute, scales="free_x") + 
+  ggtitle("Distribution for Each Variables") +
+  ylab("Frequency") +
+  theme_minimal() +
+  theme(text = element_text(size = 11), plot.title = element_text(hjust = 0.4), legend.position = "none") +
+  geom_text(data = country_median, y = 30, aes(x = c(100, 100, 40000, 10, 100, 5e+04, 60, 50 ,4), label = paste("Median  = ", median)), 
+            color = "blue", size = 2.8)
+```
+*Result: Most variables do not have a normal distribution*
+
+#Plotting the correlation between each numerical values
+```{r}
+corr <- cor(country, use = "pairwise.complete.obs")
+corrplot.mixed(corr, tl.pos = "lt", tl.col = "black")
+```
+*Data Modelling*
+#Scale the data
+```{r}
+apply(country, 2, var)
+apply(country, 2, mean)
+scaled_country <- apply(country, 2, scale)
+head(scaled_country)
+```
+*Principal Component Analysis*
+```{r}
+pca <- prcomp(scaled_country, scale = F, center = F) #the data used already scaled
+pca$rotation <- -pca$rotation
+pca$x <- -pca$x
+pca
+summary(pca)
+```
+
+```{r}
+par(mfrow = c(1,2))
+p1 <- biplot(pca, scale = F, xlab = "PC1: Low Quality of Life", ylab = "PC2: Trading Condition")
+p2 <- biplot(pca, scale = F, choices = c(3:4), xlab = "PC3: Inflation Rate", ylab = "")
+```
+*PC1 represents quality of life. Variable child_mort, total_fer, life_expec, gdpp, and income load heavily on PC1*
+*PC2 represents trading condition. Variable imports and exports load heavily on PC2*
+*PC3 represents inflation rate. Variable inflation and health load heavily on PC3*
+
+#Explain the proportion of variance and cumulative proportion
+```{r}
+pca$var <- pca$sdev^2
+pov <- pca$var/sum(pca$var)
+pov
+cumpov <- cumsum(pov)
+cumpov
+```
+*From the above calculation, we can see that the 1st, 2nd, and 3rd principal components account for 45.95%, 17.18%, and 13.00% of the variance in the data respectively. They account for 76.14% of the total variance (cumulative proportion) in the data.*
+
+#Visualize with Pareto Plot
+```{r}
+par(mfrow = c(1,2))
+plot(pov, xlab = "Principal Component", ylab = "Proportion of Variance Explained", type = "o", ylim = c(0,1),
+     main = "Proportion of Variance")
+plot(cumpov, xlab = "Principal Component", ylab = "Proportion of Variance Explained", type = "o", ylim = c(0,1),
+     main = "Cumulative Proportion")
+```
+
+```{r}
+plot(pca, type = "lines", main = "Scree Plot")
+abline(h = 1, col = "red", lty = 2)
+```
+*Result: The cumulative proportion plot and scree plot show that the first three principal components should be selected (since the 4th Principal Component's variance is below 1*
+
+```{r}
+country_pca <- pca$x[,1:3]
+country_pca = cbind(country1, country_pca)
+colnames(country_pca) = c("country","PC1","PC2","PC3")
+rownames(country_pca) <- country_pca[,1]
+country_pca <- country_pca[,-1]
+head(country_pca)
+```
+#Hierarchical Clustering (Agglomerative Method)
+#Dissimilarity Measure (Euclidean and Manhattan Distance)
+```{r}
+e_dis <- dist(country_pca, method = "euclidean")
+m_dis <- dist(country_pca, method = "manhattan")
+```
+
+*This is performed using the agnes() function, which additionally computes the agglomerative coefficient. Aggregation coefficient measures clustering structure identification, and a value closer to 1 indicates a stronger structure.*
+
+#Euclidean Hierarchical Clustering
+```{r}
+e_single_method <- agnes(e_dis, method = "single") #nearest method
+e_complete_method <- agnes(e_dis, method = "complete") #furthest method
+e_average_method <- agnes(e_dis, method = "average") #average method
+e_ward_method <- agnes(e_dis, method = "ward") #ward method
+```
+
+```{r}
+e_func <- function(x){
+  agnes(e_dis, method = x)$ac
+}
+```
+
+#Manhattan Hierarchical Clustering
+```{r}
+m_single_method <- agnes(m_dis, method = "single") #nearest method
+m_complete_method <- agnes(m_dis, method = "complete") #furthest method
+m_average_method <- agnes(m_dis, method = "average") #average method
+m_ward_method <- agnes(m_dis, method = "ward") #ward method
+```
+
+```{r}
+m_func <- function(x){
+  agnes(m_dis, method = x)$ac
+}
+```
+
+#Agglomerative Coefficient
+```{r}
+coeff <- c("single", "complete", "average", "ward")
+names(coeff) <- c("single", "complete", "average", "ward")
+```
+
+#Apply the function
+```{r}
+map_dbl(coeff, e_func)
+map_dbl(coeff, m_func)
+```
+*Result: Manhattan Hierarchical Clustering combined with the Ward's Linkage has the highest performance at 97.55%*
+
+```{r}
+pltree(m_ward_method, cex = 0.55, hang = -1, main = "Manhattan Hierarchical Clustering Dendrogram")
+```
+#Decide how many groups to use using silhouette and elbow methods
+```{r}
+fviz_nbclust(country_pca, FUN = hcut, method = "silhouette")
+fviz_nbclust(country_pca, FUN = hcut, method = "wss")
+```
+*Result: Decided to divide into 3 clusters*
+
+```{r}
+clustered_hierarchical <- cutree(tree = e_ward_method, k = 3)
+table(clustered_hierarchical)
+country_clustered <- cbind(country_pca, clustered_hierarchical)
+head(country_clustered)
+```
+
+```{r}
+country_clustered %>% 
+  group_by(clustered_hierarchical) %>%
+  dplyr::summarise(n = n(), 
+            low_quality = mean(PC1),
+            trading_cond = mean(PC2),
+            inflation = mean(PC3),
+            )
+```
+#Cluster the countries
+```{r}
+fviz_cluster(list(data = country_clustered, cluster = clustered_hierarchical)) + 
+  theme_bw() + 
+  ggtitle("Hierarchical Clusters = 3")
+```
+*Note: Cluster 1: Need Help, Cluster 2: Might Need Help, Cluster 3: Do Not Need Help*
+
+#Visualize the clusters
+```{r}
+country_clustered$clustered_hierarchical <- as.factor(country_clustered$clustered_hierarchical)
+country_clustered$clustered_hierarchical <- revalue(country_clustered$clustered_hierarchical, 
+                                                    c("1" = "Help Needed", "2" = "Might Need Help", "3" = "No Help Needed"))
+
+country_clustered <- tibble::rownames_to_column(country_clustered, "Country")
+```
+
+```{r}
+worldmap <- ne_countries(scale = "medium", returnclass = "sf")
+
+group.world_Hierarchical <- merge(worldmap, country_clustered, by.x="admin", by.y="Country")
+
+ggplot(data = group.world_Hierarchical) + 
+  geom_sf(aes(color = clustered_hierarchical)) +
+  scale_fill_gradient(label=comma) +
+  theme_void() +
+  scale_colour_brewer(direction = -1) +
+  ggtitle("Needed Help Per Country by Hierarchical") + 
+  theme(plot.title = element_text(hjust = 0.6)) +
+  labs(color=NULL)
+```
+*K-Means Clustering*
+
+```{r}
+ssw <- vector("double", 10)
+for(j in 1:10){
+  ssw[j] <- sum(kmeans(country_pca, centers = j)$withinss)
+}
+plot(1:10, ssw, type = "o", xlab = "Number of Clusters", ylab = "Sum of Squares Within Groups")
+```
+*Result: Decided to divide into 3 clusters*
+
+```{r}
+set.seed(631)
+k_means <- kmeans(country_pca, country_pca[sample(1:nrow(country_pca),3),], 3) #Since k-means is randomly grouped, this setting can make the results consistent
+k_means_grouped <- k_means$cluster
+country_pca_kmean <- country_pca %>% mutate(k_means_grouped = k_means_grouped) # Mutate clusters to the main data
+
+head(country_pca_kmean)
+```
+
+```{r}
+country_pca_kmean %>% 
+  group_by(k_means_grouped) %>%
+  dplyr::summarise(n = n(), 
+            low_quality = mean(PC1),
+            trading_cond = mean(PC2),
+            inflation = mean(PC3),
+            )
+```
+#Visualize the cluster
+```{r}
+fviz_cluster(list(data = country_pca_kmean, cluster = k_means_grouped)) + 
+  ggtitle("K-Mean k = 3") + 
+  theme_bw()
+```
+*Note: Cluster 1: Need Help, Cluster 2: Might Need Help, Cluster 3: Do Not Need Help*
+```{r}
+country_pca_kmean$k_means_grouped <- as.factor(country_pca_kmean$k_means_grouped)
+country_pca_kmean$k_means_grouped <- revalue(country_pca_kmean$k_means_grouped, 
+                                             c("1" = "Need Help", "2" = "Might Need Help", "3" = "Do No Need Help "))
+country_pca_kmean <- tibble::rownames_to_column(country_pca_kmean, "Country")
+```
+
+```{r}
+worldmap <- ne_countries(scale = "medium", returnclass = "sf")
+
+group.world_kmean <- merge(worldmap, country_pca_kmean, by.x="admin", by.y="Country")
+
+
+ggplot(data = group.world_kmean) + 
+  geom_sf(aes(color = k_means_grouped)) +
+  scale_fill_gradient(label=comma) +
+  theme_void() +
+  scale_colour_brewer(direction = -1) +
+  ggtitle("Needed Help Per Country by K-Means Clustering")+
+  theme(plot.title = element_text(hjust = 0.6)) +
+  labs(color=NULL)
+```
+**REGRESSION**
+#Load the dataset
+```{r}
+insurance <- read.csv("insurance.csv")
+head(insurance)
+```
+#Load the data description
+```{r}
+insurance_desc <- read.csv("insurance_dictionary.csv")
+insurance_desc
+```
+```{r}
+str(insurance)
+insurance <- mutate_at(insurance, vars(sex, smoker, region), as.factor)
+```
+#Check the missing values and duplicate data
+```{r}
+sum(is.na(insurance))
+sum(duplicated(insurance))
+```
+
+```{r}
+insurance <- distinct(insurance)
+sum(duplicated(insurance))
+```
+*Result: There are no null values in the data and no duplicate values*
+
+#Data Summarization
+```{r}
+summary(insurance)
+```
+#Insurance Member's Age
+```{r}
+age_group <- insurance %>%
+  group_by(age) %>%
+  summarise(total = n())
+```
+
+```{r}
+age_cut <- cut(age_group$age, c(seq(15, 65, by = 5)))
+age_group_agg <- aggregate(total ~ age_cut, age_group, sum)
+```
+
+```{r}
+ggplot(insurance, aes(age)) +
+geom_freqpoly(binwidth = 1, color = "blue") + 
+geom_histogram(binwidth = 1, fill = "green", alpha = 0.4) +
+theme_linedraw() + 
+theme(plot.title = element_text(face = "bold")) + 
+      labs(x = 'Age', y = 'Frequency', title = "Medical Insurance Members by Age") + 
+      scale_y_continuous(limits = c(0,70), breaks = c(0,10,20,30,40,50,60,70))
+```
+*Insurance Members' Age distribution is relative the same around 25 participants per age group, except age 18 and 19 which have higher participants, above 60*
+
+#Insurance's Member Gender
+```{r}
+sex <- insurance %>% 
+  group_by(sex) %>% 
+  summarise(total = n())
+sex$percentage <- 100*prop.table(sex$total)
+sex
+```
+```{r}
+ggplot(sex, aes(x = sex, y = total, fill = sex)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Medical Insurance Members by Gender", x = "Gender", y = "Total") +
+  scale_fill_manual(values = c("#6baed6", "#4292c6")) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), color = "black") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none")
+```
+*Insurance Members' Gender has relatively equal proportion*
+
+#Insurance Member's Region
+```{r}
+region <- insurance %>% 
+  group_by(region) %>% 
+  summarise(total = n())
+region$percentage <- 100*prop.table(region$total)
+region
+```
+```{r}
+ggplot(region, aes(x = region, y = total, fill = region)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Medical Insurance Members by Region", x = "Region", y = "Total") +
+  scale_fill_manual(values = c("#1b9e77", "#d95f02", "#7570b3", "#e7298a")) +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), 
+            position = position_stack(vjust = 0.5), color = "black") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+        legend.position = "none")
+```
+*Insurance Members' Region has relatively equal proportion of four regions*
+
+#Age and Charges Relationship
+```{r}
+ggplot(insurance,aes(age,charges)) +
+  geom_point(color = "#3ACABB") +
+  geom_smooth(color = "#FF5349") +
+  labs(title="Age and Charges Relationship",x = "Age", y = "charges") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: The charges increase with age but there seems like a three line structure, we can identify the reason by incorporating other variables*
+
+#Age and Charges Incorporating Smoker Status
+```{r}
+ggplot(insurance,aes(age,charges,fill=smoker, color=smoker)) + 
+  geom_point() + 
+  stat_poly_line() + 
+  stat_poly_eq() +
+  labs(title = "Age vs Charges Incorporating Smoker Status") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: The person who smoke charged higher compared to people who do not smoke for same age*
+
+#Age and Charges Incorporating Sex
+```{r}
+ggplot(insurance,aes(age,charges,fill=sex, color=sex)) + 
+  geom_point() + 
+  stat_poly_line() + 
+  stat_poly_eq() +
+  labs(title = "Age vs Charges Incorporating Sex") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: There is a little difference between male and female, they are charging approximately the same for each age*
+
+#Age and Charges Incorporating Children
+```{r}
+ggplot(insurance,aes(age,charges, fill=children, group = children, color=children)) + 
+  geom_point() + 
+  stat_poly_line(se = FALSE) + 
+  stat_poly_eq() +
+  labs(title = "Age vs Charges Incorporating Children") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: There an is impact by number of children on charges for each age, but we cannot find particular relation from the graph*
+
+#Age and Charges Incorporating Region
+```{r}
+ggplot(insurance,aes(age,charges, fill=region, color=region)) + 
+  geom_point() + 
+  stat_poly_line(se = FALSE) + 
+  stat_poly_eq() +
+  labs(title = "Age vs Charges Incorporating Region") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: There is an impact by region on charges for each age, but we cannot find particular relation from the graph*
+
+#BMI and Charges Relationship
+```{r}
+ggplot(insurance,aes(bmi,charges)) +
+  geom_point(color = "#3ACABB") +
+  geom_smooth(color = "#FF5349") +
+  labs(title="BMI and Charges Relationship",x="bmi",y="charges") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: The charges increase with bmi but there seems like a two line structure, we can identify the reason by incorporating other variables*
+
+#BMI and Charges Incorporating Smoker Status
+```{r}
+ggplot(insurance,aes(bmi,charges,fill=smoker, color=smoker)) + 
+  geom_point() + 
+  stat_poly_line() + 
+  stat_poly_eq() +
+  labs(title = "BMI vs Charges Incorporating Smoker Status") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: Smoker Status is the main reason why there seems a two line structure, also showed by the high R-squared. The person who smoke charged higher than the person who do not smoke for the same BMI.*
+
+#BMI and Charges Incorporating Sex
+```{r}
+ggplot(insurance,aes(bmi,charges,fill=sex, color=sex)) + 
+  geom_point() + 
+  stat_poly_line() + 
+  stat_poly_eq() +
+  labs(title = "BMI vs Charges Incorporating Sex") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: There is a little difference between male and female, they are charging approximately the same for same BMI*
+
+#BMI and Charges Incorporating Children
+```{r}
+ggplot(insurance,aes(bmi,charges, group = children, fill=children, color=children)) + 
+  geom_point() + 
+  stat_poly_line(se = FALSE) + 
+  stat_poly_eq() +
+  labs(title = "BMI vs Charges Incorporating Children") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: There is an impact by number of children on charges for each BMI, but we cannot find particular relation from the graph*
+
+#BMI and Charges Incorporating Region
+```{r}
+ggplot(insurance,aes(bmi,charges, fill=region, color=region)) + 
+  geom_point() + 
+  stat_poly_line(se = FALSE) + 
+  stat_poly_eq() +
+  labs(title = "BMI vs Charges Incorporating Region") +
+  theme(plot.title = element_text(hjust = 0, face = "bold"))
+```
+*Result: There is an impact by region on charges for each BMI, but we cannot find particular relation from the graph*
+
+*Correlation Matrix*
+```{r}
+corr_matrix <- cor(insurance %>% mutate_if(is.factor, as.numeric))
+
+cor_plot <- colorRampPalette(c("#C23728", "#DE6E56", "#E2E2E2", "#63BFF0", "#1984C5"))
+corrplot(corr_matrix, method="color",  
+         order="hclust", type="lower",  
+         addCoef.col = "black", 
+         tl.col="black", tl.srt=45, 
+         sig.level = 0.01, 
+         diag=FALSE)
+```
+*According to the correlation matrix, smoker have a high correlation with charges, there is almost no correlation between other features.*
+
+#Divide the dataset into train set and test set
+```{r}
+set.seed(50)
+split <- sample.split(insurance, 0.7)
+insurance_train <- subset(insurance, split == TRUE)
+insurance_test <- subset(insurance, split == FALSE)
+```
+
+#Linear Regression
+```{r}
+lr <- lm(charges~.,data = insurance_train)
+summary(lr)
+lr_pred <- predict(lr,insurance_test)
+radj <- summary(lr)$adj.r.squared
+lr_rmse <- RMSE(lr_pred, insurance_test$charges)
+aic <- AIC(lr)
+lr1 <- cbind("Adjusted R-Square"=radj, "RMSE"=lr_rmse, "AIC"=aic)
+```
+*From the p-values above, sex is not significant, as suggested in the exploratory data analysis earlier. The adjusted R-Squared is 0.7541*
+
+#Linear Regression without Sex
+```{r}
+lr_wos <- lm(charges~.-sex,data = insurance_train)
+summary(lr_wos)
+lr_wos_pred <- predict(lr_wos,insurance_test)
+radj <- summary(lr_wos)$adj.r.squared
+lrwos_rmse <- RMSE(lr_wos_pred, insurance_test$charges)
+aic <- AIC(lr_wos)
+lr2 <- cbind("Adjusted R-Square"=radj, "RMSE"=lrwos_rmse, "AIC"=aic)
+```
+*From the p-values above, all variables are significant on determining insurance charges. The adjusted R squared is 0.7542, slight increase from the previous model.*
+
+*We have to check the adequacy of linear model. As linear regression should be applied to data which is normally distributed, we must check the distribution and analyze again*
+```{r}
+par(mfrow=c(2,2))
+plot(lr_wos)
+```
+*Result: The Residuals vs Fitted plot indicates a non-linear relationship as the line is not horizontal. As the residuals do not fall exactly on the straight line, the Normal Q-Q plot suggests that the data is not normally distributed. The scale-location plot indicates heteroscedasticity as it has non straight line. The Residuals vs Leverage plot identified some influential outliers beyond the Cook's distance.*
+
+*We want to transform the response variable to correct the model inadequacies by using log transformation*
+#Log Linear Regression
+```{r}
+log_lr <- lm(log(charges)~.-sex,data = insurance_train)
+summary(log_lr)
+log_lr_pred <- predict(log_lr,insurance_test)
+radj <- summary(log_lr)$adj.r.squared
+log_rmse <- RMSE(log_lr_pred, insurance_test$charges)
+aic <- AIC(log_lr)
+lr3 <- cbind("Adjusted R-Square"=radj, "RMSE"=log_rmse, "AIC"=aic)
+```
+*By taking log, all variables become significant and the adjusted R-squared is higher at 0.7645*
+
+*Checking the model adequacy for Log Linear Regression*
+```{r}
+par(mfrow=c(2,2))
+plot(log_lr)
+```
+*Result: The Residuals vs Fitted plot indicates a non-linear relationship as the line is not horizontal, but the points are more spread out now. As the residuals do not fall exactly on the straight line, the Normal Q-Q plot suggests that the data is not normally distributed. The scale-location plot indicates heteroscedasticity as it has non straight line. The Residuals vs Leverage plot identified some influential outliers beyond the Cook's distance. But the evaluation has improved.*
+
+#Compare the residuals plot for the 3 linear regressions.
+```{r}
+par(mfrow=c(1,3))
+
+plot(lr, c(1), main = "\n\n\n\n\n LM 1")
+plot(lr_wos, c(1), main = "\n\n\n\n\n LM 2")
+plot(log_lr, c(1), main = "\n\n\n\n\n Log LM")
+```
+*We can see the residual plots show a parabolic trend, which indicates a strong indication of non-linearity in the data.*
+
+#Polynomial Regression
+
+#We want to enhance the correlation of the other features and improve our model by employing Polynomial regression. 
+*We exclude charges in the process of generating polynomial combinations*
+```{r}
+y_insurance_train <- insurance_train$charges
+y_insurance_test <- insurance_test$charges
+```
+
+*We drop sex variable as there is no relation with charges. We mutate smoker and region as numeric to make the polynomial combinations*
+```{r}
+x_insurance_train <- insurance_train[-c(2,7)] %>% 
+  mutate(smoker = as.numeric(smoker), region = as.numeric(region))
+x_insurance_test <- insurance_test[-c(2,7)] %>% 
+  mutate(smoker = as.numeric(smoker), region = as.numeric(region))
+```
+
+*Polynomial Combinations*
+```{r}
+poly_formula <- as.formula(
+  paste(' ~ .^2 + ', paste('poly(', colnames(x_insurance_train), ', 2, raw=TRUE)[, 2]', collapse = ' + ')))
+
+poly_formula
+```
+
+```{r}
+poly_train <- as.data.frame(model.matrix(poly_formula, x_insurance_train))
+poly_test <- as.data.frame(model.matrix(poly_formula, x_insurance_test))
+poly_train$charges <- y_insurance_train
+poly_test$charges <- y_insurance_test
+colnames(poly_train)
+```
+*Here, we have 22 columns in our new datasets poly_train and poly_test*
+
+#Make the polynomial model, we start with all features and use "step" function for backward elimination
+```{r}
+pol <- lm(charges ~ ., data = poly_train)
+step(pol)
+```
+```{r}
+lp <- lm(charges ~ age + bmi + children + smoker + `poly(children, 2, raw = TRUE)[, 2]` + `poly(bmi, 2, raw = TRUE)[, 2]` + `poly(age, 2, raw = TRUE)[, 2]` +  `age:region` + `bmi:smoker` + `bmi:region` + `children:smoker`, data = poly_train)
+summary(lp)
+lp_pred <- predict(lp, poly_test)
+radj <- summary(lp)$adj.r.squared
+lp_rmse <- RMSE(lp_pred, insurance_test$charges)
+aic <- AIC(lp)
+lp1 <- cbind("Adjusted R-Square"=radj, "RMSE"=lp_rmse, "AIC"=aic)
+```
+*Result: All variables are significant on charges. The adjusted R-Squared is 0.8519, even higher than the log linear regression.*
+
+*Checking the model adequacy for Polynomial Regression*
+```{r}
+par(mfrow=c(2,2))
+plot(lp)
+```
+*Result: The Residual vs Fitted plot still implies a non-linear relationship as it is not equally spread. As the residuals do not fall exactly on the straight line, the Normal Q-Q plot suggests that the data is not normally distributed. The scale-location plot indicates heteroscedasticity as the residuals are not spread equally along the ranges of predictors. The Residuals vs Leverage plot identified some influential outliers beyond the Cook's distance. However, the evaluation has improved so much, better than the previous regression techniques.*
+
+#Model Comparison
+```{r}
+result <- rbind(lr1, lr2, lr3, lp1)
+rownames(result) <- c("Linear Regression 1", "Linear Regression 2", "Log Linear Regression", "Polynomial Regression")
+result
+```
+*From the table above, polynomial regression plays an important role as it has 85.19% adjusted R-squared, meaning that 85.19% of the variation in charges could be explained by the independent variables. Also, it has the lowest RMSE at 4958.516. However, we would like to explore other techniques such as Random Forest, Support Vector Machine (SVM), and XGBoost.*
+
+#Random Forest
+```{r}
+set.seed(42)
+r_f <- randomForest(charges ~., insurance_train, ntree =500, type = "regression", importance = T)
+r_f #R-Squared is 84.74%, 
+rf_predict <- predict(r_f, insurance_test)
+rf_rmse <- rmse(rf_predict, insurance_test$charges)
+rf_rmse
+```
+
+```{r}
+imp_var <- varImp(r_f, scale = TRUE)
+imp_var
+varImpPlot(r_f)
+```
+*In determining the insurance charges, smoker is the most important factor, followed by age and BMI. Other factors have minor or no influence on the insurance charges.*
+
+#Support Vector Machine
+```{r}
+s_v_m = svm(formula = charges~., data = insurance_train, type = "eps-regression")
+s_v_m
+svm_predict <- predict(s_v_m, insurance_test)
+svm_rmse <- rmse(svm_predict, insurance_test$charges)
+summary(s_v_m)
+```
+
+#XGBoost
+```{r}
+set.seed(42)
+xgb <- train(charges~., data = insurance_train, method = "xgbTree",
+             trControl = trainControl("cv", number = 10), scale=TRUE)
+varImp(xgb)
+xgb_predict <- predict(xgb, insurance_test)
+xgb_rmse <- rmse(xgb_predict, insurance_test$charges)
+```
+
+```{r}
+result_all <- rbind(xgb_rmse, rf_rmse, lp_rmse, svm_rmse, lrwos_rmse, lr_rmse, log_rmse)
+rownames(result_all) <- c("XG Boost", "Random Forest", "Polynomial Regression", "Support Vector Machine", "Linear Regression 2", "Linear Regression 1", "Log Linear Regression")
+colnames(result_all) <- "RMSE"
+result_all
+```
+*Visualize the RMSE comparison*
+```{r}
+visual <- data.frame(
+  Model = c("XGB", "RF", "PR", "SVM"),
+  RMSE = c(xgb_rmse, rf_rmse, lp_rmse, svm_rmse)
+)
+ggplot(visual, aes(x = Model, y = RMSE, label=sprintf("%0.3f", round(RMSE, digits = 3)))) + 
+  geom_point(color = "maroon", size = 3) +
+  labs(title = "RMSE of Regression Techniques", x = "Model", y = "RMSE") +
+  geom_text(size = 3.5, hjust = -0.2, vjust = 0.5)
+```
+*From the result, we can say that XG Boost is the best model in predicting charges since it has the lowest RMSE at 4767.463*
+
+**CLASSIFICATION**
+
+```{r}
+cust_churn <- read.csv("customer_churn.csv")
+head(cust_churn)
+```
+```{r}
+str(cust_churn)
+```
+```{r}
+summary(cust_churn)
+```
+```{r}
+sum(is.na(cust_churn))
+```
+*From the summary above, there are 11 NAs, which only accounts for 0.156% of the total observations that we decided to remove before analyzing the data.*
+
+```{r}
+cust_churn <- na.omit(cust_churn)
+print(nrow(cust_churn))
+```
+*Now, the data has no missing values with 7032 rows.*
+
+#Continuous Variables
+```{r}
+gr1 <- ggplot(cust_churn, aes(x = MonthlyCharges, color = Churn)) +
+  geom_freqpoly() + ggtitle("Line Chart of Monthly Charges") + 
+  theme(plot.title = element_text(hjust = 0.5))
+gr2 <- ggplot(cust_churn , aes(x = MonthlyCharges)) + geom_boxplot(fill="turquoise") + 
+  theme_classic() + ggtitle("Boxplot of Monthly Charges") + theme(plot.title = element_text(hjust = 0.5))
+print(plot_grid(gr1,gr2, ncol = 1, nrow = 2))
+```
+*We see that the graph of customer who didn't churn is higher than who churned. There is no outliers.*
+
+```{r}
+gr1 <- ggplot(cust_churn, aes(x = TotalCharges, color = Churn))+
+  geom_freqpoly() + ggtitle("Line Chart of Total Charges") + 
+  theme(plot.title = element_text(hjust = 0.5))
+gr2 <- ggplot(cust_churn , aes(x = TotalCharges)) + geom_boxplot(fill="turquoise") + 
+  theme_classic() + ggtitle("Boxplot of Total Charges") + theme(plot.title = element_text(hjust = 0.5))
+print(plot_grid(gr1,gr2, ncol = 1, nrow = 2))
+```
+*From the graphs above, the distribution is positively skewed*
+
+```{r}
+library(cowplot)
+gr1 <- ggplot(cust_churn, aes(tenure, color = Churn))+
+  geom_freqpoly() + ggtitle("Line Chart of Tenure") + 
+  theme(plot.title = element_text(hjust = 0.5))
+gr2 <- ggplot(cust_churn , aes(tenure)) + geom_boxplot(fill="lightgreen") + 
+  theme_classic() + ggtitle("Boxplot of Tenure") + theme(plot.title = element_text(hjust = 0.5))
+print(plot_grid(gr1,gr2, ncol = 1, nrow = 2))
+```
+*Correlation Plot*
+```{r}
+cor_matrix <- cor(cust_churn[, c("TotalCharges", "MonthlyCharges", "tenure")])
+corrplot.mixed(cor_matrix, upper = "circle", tl.col = "black")
+```
+*The plot indicates strong positive correlations between total charges variable and tenure variable (0.83) and between total charges variable and monthly charges variable (0.65).*
+
+*The current tenure data is in months. Change the tenure data into years*
+```{r}
+cust_churn <- cust_churn %>% 
+  mutate(year_tenure = case_when(tenure <= 12 ~ "0-1 year",
+                                tenure > 12 & tenure <= 24 ~ "1-2 years",
+                                tenure > 24 & tenure <= 36 ~ "2-3 years",
+                                tenure > 36 & tenure <= 48 ~ "3-4 years",
+                                tenure > 48 & tenure <= 60 ~ "4-5 years",
+                                tenure > 60 & tenure <= 72 ~ "5-6 years"))
+cust_churn <- subset(cust_churn, select = -c(tenure))
+```
+
+#Categorical Variables
+*Mutate SeniorCitizen into categorical variable.*
+```{r}
+cust_churn <- cust_churn %>%
+  mutate(SeniorCitizen = recode(SeniorCitizen, "0" = "No", "1" = "Yes"))
+
+cat <- subset(cust_churn, select = -c(customerID, MonthlyCharges, TotalCharges, year_tenure))
+```
+
+*Customers' Basic Information*
+```{r}
+basic_info <- cat %>%
+  dplyr::select(gender:PhoneService, InternetService, Churn) %>% 
+  pivot_longer(cols = -Churn, names_to = "Variable", values_to = "Value")
+
+ggplot(basic_info) +
+  geom_bar(aes(x = Value, fill = Churn), position = "fill", stat = "count") +
+  facet_wrap(~ Variable, nrow = 2, scales = "free_x") +
+  theme(axis.text.x = element_text(hjust = 0.5))
+```
+*Gender and phone service seem to have minimal impact on churn rate. Customers without dependents or partners and those who use fiber optic internet have higher churn rates.*
+
+*Check if PhoneService and MultipleLines is related*
+```{r}
+table(cust_churn[, c("PhoneService","MultipleLines")])
+```
+*When the PhoneService value is "No", the corresponding MultipleLines value is "No phone service". Nevertheless, the "No phone service" value lacks predictive power.*
+
+```{r}
+vars <- c("OnlineSecurity", "OnlineBackup", "DeviceProtection", 
+          "TechSupport", "StreamingTV", "StreamingMovies")
+
+tables <- lapply(vars, function(var) {
+  table(cust_churn$InternetService, cust_churn[[var]])
+})
+tables
+```
+*Same issue occured, we decide to eliminate the rows containing "No phone service" and "No internet service".*
+
+```{r}
+type_info <- cat %>%
+  dplyr::select(DeviceProtection, MultipleLines, OnlineBackup, OnlineSecurity, StreamingMovies, 
+                StreamingTV, TechSupport, Churn) %>% 
+  filter(OnlineSecurity != "No internet service" & MultipleLines != "No phone service") %>% 
+  pivot_longer(cols = -Churn, names_to = "Variable", values_to = "Value")
+
+ggplot(type_info) +
+  geom_bar(aes(Value, fill = Churn), stat = "count", position = "fill") +
+  facet_wrap(~ Variable, nrow = 2, scales = "free_x") +
+  theme(axis.text.x = element_text(hjust = 0.5))
+```
+*Multiple Lines, Streaming Movies, and Streaming TV seem to have minimal impact on churn rate. Whereas the rest seem to have influence on churn rate*
+
+```{r}
+aft_info <- cat %>% 
+  dplyr::select(Contract, PaperlessBilling, PaymentMethod, Churn) %>% 
+  pivot_longer(cols = -Churn, names_to = "Variable", values_to = "Value")
+
+ggplot(aft_info) +
+  geom_bar(aes(Value, fill = Churn), stat = "count", position = "fill") +
+  facet_wrap(~ Variable, nrow = 3, scales = "free_x") +
+  theme(axis.text.x = element_text(hjust = 0.5))
+```
+*E-check and paperless billing users churn more, while longer contract periods reduce churn.*
+
+*Now we check the overall churn rate*
+```{r}
+total_obs <- nrow(cust_churn)
+total_churn <- sum(cust_churn$Churn == "Yes")
+print(churn_rate <- total_churn / total_obs)
+```
+*Out of the total customer base, 26.58% of them have churned.*
+
+#Logistic Regression Model
+*We modify the data into binomial characters and delete the customerID variable*
+```{r}
+lrm_telco <- cust_churn
+
+lrm_telco <- lrm_telco %>%
+  mutate(across(c(Churn, Partner, PhoneService, Dependents, PaperlessBilling),
+                ~ ifelse(. == "Yes", 1, 0))) %>% 
+  mutate(gender = ifelse(gender == "Female", 1, 0))
+
+lrm_telco <- subset(lrm_telco, select = -c(customerID))
+```
+
+*Make one-hot encoding for dummy variables*
+```{r}
+dummy1 <- dummyVars(" ~ .", data = lrm_telco)
+dummy1 <- data.frame(predict(dummy1, newdata = lrm_telco))
+str(dummy1)
+```
+*Eliminate the variables containing "No phone service" and "No internet service" as they do not contribute to making predictions and the factor's final category to prevent singularities*
+```{r}
+dummy1 <- dummy1 %>% 
+  dplyr::select(-contains("No.phone.service"), -contains("No.internet.service")) %>% 
+  dplyr::select(-InternetServiceNo, -ContractTwo.year, -PaymentMethodMailed.check, -year_tenure5.6.years)
+str(dummy1)
+```
+
+#Split the dataset
+```{r}
+set.seed(818)
+assg <- sample(0:1, size= nrow(dummy1), prob = c(0.7,0.3), replace = TRUE)
+train <- dummy1[assg == 0, ]
+test <- dummy1[assg == 1, ]
+```
+
+#Check if the churn rate for train and test set are close
+```{r}
+train %>%
+  summarise(Observations = n(), Churn = sum(Churn == 1), Churn_Rate = Churn/Observations)
+test %>%
+  summarise(Observations = n(), Churn = sum(Churn == 1), Churn_Rate = Churn/Observations)
+```
+```{r}
+lrm <- glm(Churn ~., family = "binomial", data = train) 
+summary(lrm)
+```
+*7 NAs are observed from above results due to removal of variables with "No Phone Service" and "No Internet Service" when creating dummy variables, leaving variables ending with ".Yes" and ".No" with multicollinearity.*
+
+*Create new model (lrm2) to only include significant variables*
+```{r}
+lrm2 <- stepAIC(lrm, trace = 0)
+summary(lrm2)
+```
+```{r}
+library(car)
+vif(lrm2)
+```
+*We will remove the MonthlyCharges and the InternetServiceFiber.optic for the subsequent model*
+
+```{r}
+lrm3 <- glm(Churn ~ StreamingTVNo + PaperlessBilling + SeniorCitizenNo + Dependents + PhoneService + MultipleLinesNo +
+              InternetServiceDSL + OnlineBackupNo + DeviceProtectionNo + StreamingMoviesNo + ContractMonth.to.month +
+              ContractOne.year + PaymentMethodElectronic.check + MonthlyCharges + 
+              year_tenure0.1.year + year_tenure1.2.years, family = "binomial", data = train)
+
+summary(lrm3)
+vif(lrm3)
+```
+*VIFs are good (<5), but p-values for StreamingTVNo and StreamingMoviesNo are >0.05. So, we'll remove these insignificant variables and rerun the updated model.*
+
+```{r}
+lrm4 <- glm(Churn ~  InternetServiceDSL + PaperlessBilling + SeniorCitizenNo + DeviceProtectionNo + Dependents + 
+              PhoneService + MultipleLinesNo +  OnlineBackupNo +  ContractMonth.to.month + ContractOne.year +
+              PaymentMethodElectronic.check + MonthlyCharges + year_tenure0.1.year + year_tenure1.2.years, family = "binomial", data = train)
+summary(lrm4)
+vif(lrm4)
+```
+*All variables become significant. We use model lrm4 as the final model*
+
+*Cross Validation*
+```{r}
+train1 <- predict(lrm4, data = train, type = "response")
+test1 <- predict(lrm4, newdata = test, type = "response")
+```
+
+*Cutoff at 0.5*
+```{r}
+train_p <- factor(train1 >= 0.5, labels = c("No", "Yes"))
+train_a <- factor(train$Churn == 1, labels = c("No", "Yes"))
+test_p <- factor(test1 >= 0.5, labels = c("No", "Yes"))
+test_a <- factor(test$Churn == 1, labels = c("No", "Yes"))
+```
+
+*Train Set*
+```{r}
+library(pROC)
+confusionMatrix(train_p, reference = train_a)
+plot_roc <- roc(train$Churn, train1, plot= TRUE, print.auc=TRUE)
+```
+*Test Set*
+```{r}
+cm1 <- confusionMatrix(test_p, reference = test_a)
+cm1
+roc <- roc(test$Churn, test1, plot= TRUE, print.auc=TRUE)
+acc_lrm <- cm1$overall[1]
+auc_lrm <- roc$auc
+lrm_comb <- cbind("Accuracy" = acc_lrm, "AUC" = auc_lrm)
+```
+*Train set: Accuracy = 0.80, AUC = 0.85. Test set: Accuracy = 0.79, AUC = 0.83. The small difference in accuracy and AUC between the train and test sets indicates a good model. However, the specificity for both train and test are low at 0.52 and 0.50 respectively.*
+
+#Decision Tree 
+```{r}
+dt_telco <- cust_churn
+dt_telco$customerID <- NULL
+dt_telco <- dt_telco %>% 
+  mutate_if(is.character, as.factor)
+str(dt_telco)
+```
+*Split the dataset*
+```{r}
+set.seed(818)
+dt <- sample(0:1, size = nrow(dt_telco), prob = c(0.7, 0.3), replace = TRUE)
+train_dt <- dt_telco[dt == 0, ]
+test_dt <- dt_telco[dt == 1, ]
+```
+
+*Train the model*
+```{r}
+#use all variables at first
+library(rpart)
+dt_mod1 <- rpart(Churn~., data = train_dt, method = "class", parms = list(split = "gini"))
+```
+
+*Model 1*
+```{r}
+train_dt_p <- predict(dt_mod1, data = train_dt, type = "class")
+train_dt_prob <- predict(dt_mod1, data = train_dt, type = "prob")
+test_dt_p <- predict(dt_mod1, newdata= test_dt, type = "class")
+test_dt_prob <- predict(dt_mod1, newdata = test_dt, type = "prob")
+```
+
+*Train Set*
+```{r}
+confusionMatrix(train_dt_p, reference = train_dt$Churn)
+train_dt_a <- ifelse(train_dt$Churn == "Yes", 1,0)
+roc <- roc(train_dt_a, train_dt_prob[,2], plot= TRUE, print.auc=TRUE)
+```
+*Test Set*
+```{r}
+confusionMatrix(test_dt_p, reference = test_dt$Churn)
+test_dt_a <- ifelse(test_dt$Churn == "Yes", 1,0)
+roc <- roc(test_dt_a, test_dt_prob[,2], plot = TRUE, print.auc = TRUE)
+```
+*Train set: Accuracy = 0.79, AUC = 0.80. Test set: Accuracy = 0.79, AUC = 0.78.*
+
+*Due to high correlation between TotalCharges, MonthlyCharges, and tenure, we plan to re-run the model without TotalCharges.*
+```{r}
+dt_mod2 <- rpart(Churn ~. -TotalCharges, data = train_dt, method = "class", 
+                 parms = list(split = "gini"))
+```
+
+*Model 2*
+```{r}
+train_dt_p2 <- predict(dt_mod2, data = train_dt, type = "class")
+train_dt_prob2 <- predict(dt_mod2, data = train_dt, type = "prob")
+test_dt_p2 <- predict(dt_mod2, newdata= test_dt, type = "class")
+test_dt_prob2 <- predict(dt_mod2, newdata = test_dt, type = "prob")
+```
+
+*Train Set*
+```{r}
+confusionMatrix(train_dt_p2, reference = train_dt$Churn)
+train_dt_a2 <- ifelse(train_dt$Churn == "Yes", 1,0)
+roc <- roc(train_dt_a2, train_dt_prob2[,2], plot= TRUE, print.auc=TRUE)
+```
+*Test Set*
+```{r}
+cm2 <- confusionMatrix(test_dt_p2, reference = test_dt$Churn)
+cm2
+test_dt_a2 <- ifelse(test_dt$Churn == "Yes", 1,0)
+roc <- roc(test_dt_a, test_dt_prob2[,2], plot = TRUE, print.auc = TRUE)
+acc_dt <- cm2$overall[1]
+auc_dt <- roc$auc
+dt_comb <- cbind("Accuracy" = acc_dt, "AUC" = auc_dt)
+```
+*Train set: Accuracy = 0.80, AUC = 0.80. Test set: Accuracy = 0.78, AUC = 0.785. Slightly better compared to model 1*
+#Decided to use dt_mod2 as the final model.
+
+#Random Forest
+```{r}
+#We will use the same data (train and test set) from the decision tree
+set.seed(42)
+rf_mod1 <- randomForest(Churn ~., data = train_dt)
+print(rf_mod1)
+```
+*Cross Validation (rf_mod1 model)*
+```{r}
+train_rf_p <- predict(rf_mod1, train_dt, type = "class")
+train_rf_prob <- predict(rf_mod1, train_dt, type = "prob") 
+test_rf_p <- predict(rf_mod1, newdata = test_dt, type = "class")
+test_rf_prob <- predict(rf_mod1, newdata = test_dt, type = "prob")
+```
+
+*Train Set*
+```{r}
+confusionMatrix(train_rf_p, reference = train_dt$Churn)
+train_rf_a <- ifelse(train_dt$Churn == "Yes", 1,0)
+roc <- roc(train_rf_a, train_rf_prob[,2], plot= TRUE, print.auc=TRUE)
+```
+
+*Test Set*
+```{r}
+cm3 <- confusionMatrix(test_rf_p, reference = test_dt$Churn)
+cm3
+test_rf_a <- ifelse(test_dt$Churn == "Yes", 1,0)
+roc <- roc(test_rf_a, test_rf_prob[,2], plot = TRUE, print.auc = TRUE)
+acc_rf <- cm3$overall[1]
+auc_rf <- roc$auc
+rf_comb <- cbind("Accuracy" = acc_rf, "AUC" = auc_rf)
+```
+*Train set: Accuracy = 0.9756, AUC = 0.995. Test set: Accuracy = 0.7903, AUC = 0.818.*
+
+*Variable Importance*
+```{r}
+varImpPlot(rf_mod1)
+```
+*Compare the models' accuracy and AUC*
+```{r}
+result_classification <- rbind(lrm_comb, dt_comb, rf_comb)
+rownames(result_classification) <- c("Logistic Regression", "Decision Tree", "Random Forest")
+result_classification
+```
+
+*Compare the models' ROC*
+```{r}
+library(ROCR)
+result_classification <- list(test1, test_dt_prob2[,2], test_rf_prob[,2])
+len <- length(result_classification)
+list1 <- rep(list(test_dt$Churn), len)
+
+p <- prediction(result_classification, list1)
+roc_per <- performance(p, "tpr", "fpr")
+plot(roc_per, col = as.list(1:len), main = "ROC from Test Set Comparison")
+legend(x = "bottomright",
+       legend = c("Logistic Regression", "Decision Tree", "Random Froest"),
+       fill = 1:len)
+```
+*In terms of model performance, the random forest model achieved the highest accuracy of 0.79, followed by the logistic regression model with an accuracy of 0.79 and the decision tree model with an accuracy of 0.78.*
